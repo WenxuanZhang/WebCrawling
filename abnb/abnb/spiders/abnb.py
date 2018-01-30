@@ -5,6 +5,11 @@ import sys
 from scrapy.linkextractors import LinkExtractor
 from items import AbnbItem
 from scrapy.spiders import Rule, CrawlSpider
+from scrapy.utils.response import open_in_browser
+import json
+import re
+from bs4 import BeautifulSoup
+
 
 
 reload(sys)
@@ -18,9 +23,7 @@ class MySpider(scrapy.Spider):
 	allowed_domains = ["airbnb.com/rooms"]
 	next_page_domain = ['https://www.airbnb.com/s/Chengdu--Sichuan--China/homes']
 
-	start_urls = ['https://www.airbnb.com/s/'+QUERY]
-	print start_urls
-	next_page = 'https://www.airbnb.com/s/Chengdu--Sichuan--China/homes?allow_override%5B%5D=&place_id=ChIJIXdEACPF7zYRAg4kLs5Shrk&refinement_paths%5B%5D=%2Ffor_you&s_tag=MH0aE2dZ&section_offset='
+	start_urls = ['https://www.airbnb.com/s/Chengdu--Sichuan--China?s_tag=liQkOabl&allow_override%5B%5D=']
 	# rules = [Rule(LinkExtractor(canonicalize=True,unique=True),follow=True,callback="parse_items")]
 	# start the request
 	# def start_requests(self):
@@ -29,42 +32,88 @@ class MySpider(scrapy.Spider):
 	# 		yield scrapy.Request(url, callback=self.parse, dont_filter=True)
     # visit each page then move to the next page 
 	# Get page number 
-	def last_page(self,response):
-		page_number = 0
-		links = LinkExtractor(canonicalize=True, unique=True).extract_links(response)
-		for link in links:
-		# Check whether the domain of the URL of the link is allowed; so whether it is in one of the allowed domains
-			print link
-			is_allowed = False
-			for allowed_domain in self.allowed_domains:
-				if allowed_domain in link.url:
-					is_allowed = True
-					if is_allowed:
-						page_number +=1
-		return page_number
 
+	def parse(self,response):
+		links = LinkExtractor(canonicalize=True, unique=True).extract_links(response)
+		page_numbers = []
+		for link in links:
+			if MySpider.next_page_domain[0] in link.url:
+				page_numbers.append(link.text)
+		print(page_numbers)
+		next_page = ['https://www.airbnb.com/s/Chengdu--Sichuan--China/homes?allow_override%5B%5D=&s_tag=R69H-zV3']
+		max_page_number = page_numbers[-1]
+		for i in range(1,int(max_page_number)):
+			next_page.append(next_page[0]+'section_offset=&'+str(i))
+		for url in next_page:
+			print(url)
+			yield scrapy.Request(url,callback=self.parse_rule,dont_filter=True)
+			# rooms = LinkExtractor(canonicalize=True, unique=True).extract_links(response)
+			# for room in rooms:
+			# # Check whether the domain of the URL of the link is allowed; so whether it is in one of the allowed domains
+			# 	is_allowed = False
+			# 	if MySpider.allowed_domains[0] in room.url:
+			# 		is_allowed = True
+			# 		if is_allowed:
+			# 			yield scrapy.Request(room.url, callback=self.parse_page, dont_filter=True)
+		
 
 	def parse_rule(self,response):
-		pn = last_page(response)
-			items = []
-			links = LinkExtractor(canonicalize=True, unique=True).extract_links(response)
-			for link in links:
-			# Check whether the domain of the URL of the link is allowed; so whether it is in one of the allowed domains
-				print link
-				is_allowed = False
-				for allowed_domain in self.allowed_domains:
-					if allowed_domain in link.url:
-						is_allowed = True
-						if is_allowed:
-							yield scrapy.Request(link.url, callback=self.parse, dont_filter=True)
-		# Return all the found items
-	def parse(self, response):
+		rooms = LinkExtractor(canonicalize=True, unique=True).extract_links(response)
+		for room in rooms:
+		# Check whether the domain of the URL of the link is allowed; so whether it is in one of the allowed domains
+			is_allowed = False
+			if MySpider.allowed_domains[0] in room.url:
+				is_allowed = True
+				if is_allowed:
+					print(room.url)
+					yield scrapy.Request(room.url, callback=self.parse_page, dont_filter=True)
+	# 	# Return all the found items
+	
+	def parse_page(self, response):
+		# open_in_browser(response)
+		# pass
 		item = AbnbItem()
-		title = response.css('title::text')[0].extract()
-		print title
-		item['title'] = title.encode('utf-8')
-		item['url'] = response.url 
-		yield item
+		soup = BeautifulSoup(response.body)
+		pattern = re.compile(r'bootstrapData')
+		a = soup.find_all('script',text=pattern)
+		json_data = a[0]
+		cleaned=json_data.text.split("!--")[1].replace("-->","")
+		data = json.loads('{"data":'+cleaned+'}')
+		home_info = data['data']['bootstrapData']['reduxData']['marketplacePdp']['listingInfo']['listing']
+		item['room_title'] = home_info['name']
+		item['host_id'] = home_info['primary_host']['id']
+		item['host_name'] = home_info['primary_host']['host_name']
+		item['room_url'] = response.url 
+		item['host_member_since'] = home_info['primary_host']['member_since']
+		# Host_review 
+		item['host_response_rate'] =home_info['primary_host']['response_rate_without_na']
+		item['host_response_time'] = home_info['primary_host']['response_time_without_na']
+		item['host_info'] = home_info['primary_host']['about']
+		item['host_super'] = home_info['p3_event_data_logging']['is_superhost']
+		# Room Infor
+		# price 
+		item['room_price'] = home_info['p3_event_data_logging']['price']
+		# communication & location 
+		item['room_communication'] = home_info['p3_event_data_logging']['communication_rating']
+		item['room_location'] = home_info['p3_event_data_logging']['location_rating']
+		item['room_lag'] = home_info['p3_event_data_logging']['listing_lat']
+		item['room_lng'] = home_info['p3_event_data_logging']['listing_lng']
+		# room
+		item['room_guest_satisfaction_overall'] = home_info['p3_event_data_logging']['guest_satisfaction_overall']
+		item['room_hosting_id'] = home_info['p3_event_data_logging']['hosting_id']
+		item['room_home_tier'] = home_info['p3_event_data_logging']['home_tier']
+		item['room_saved_to_wishlist_count'] = home_info['p3_event_data_logging']['saved_to_wishlist_count']
+		item['room_amenity_num'] = len(home_info['p3_event_data_logging']['amenities'])
+		item['room_value_rating'] = home_info['p3_event_data_logging']['value_rating']
+		# location:lng, lat
+		item['room_bathroom_num'] = float(home_info['bathroom_label'].split(' ') [0])
+		item['room_guest_num'] = float(home_info['guest_label'].split(' ') [0])
+		item['room_bedroom_num'] = float(home_info['bedroom_label'].split(' ') [0])
+		item['room_bed_num']= float(home_info['bed_label'].split(' ') [0])
+		item['room_score'] = home_info['star_rating']
+
+		return item
+
 
 # # Now I learned to create Item, building pipe line, the next step is to learn with navigation rule
 
