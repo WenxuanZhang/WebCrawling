@@ -9,6 +9,7 @@ from scrapy.utils.response import open_in_browser
 import json
 import re
 from bs4 import BeautifulSoup
+import time
 
 
 
@@ -24,6 +25,7 @@ class MySpider(scrapy.Spider):
 	next_page_domain = ['https://www.airbnb.com/s/Chengdu--Sichuan--China/homes']
 
 	start_urls = ['https://www.airbnb.com/s/Chengdu--Sichuan--China?s_tag=liQkOabl&allow_override%5B%5D=']
+	visited = []
 	# rules = [Rule(LinkExtractor(canonicalize=True,unique=True),follow=True,callback="parse_items")]
 	# start the request
 	# def start_requests(self):
@@ -41,11 +43,15 @@ class MySpider(scrapy.Spider):
 				page_numbers.append(link.text)
 		print(page_numbers)
 		next_page = ['https://www.airbnb.com/s/Chengdu--Sichuan--China/homes?allow_override%5B%5D=&s_tag=R69H-zV3']
+		next_page_s = ['https://www.airbnb.com/s/Chengdu--Sichuan--China/homes?allow_override%5B%5D=&ne_lat=30.688247237313426&ne_lng=104.11966288655003&sw_lat=30.603382238805196&sw_lng=104.05185664265355&zoom=13&search_by_map=true&s_tag=Ife483uE&section_offset=']
 		max_page_number = page_numbers[-1]
-		for i in range(1,int(max_page_number)):
-			next_page.append(next_page[0]+'section_offset=&'+str(i))
+		page_urls = [next_page_s[0]+ str(pageNumber) for pageNumber in range(1, int(max_page_number))]
+		next_page = next_page + page_urls
+		# for i in range(1,int(max_page_number)):
+		# 	next_page.append(next_page[0]+'section_offset=&'+str(i))
 		for url in next_page:
 			print(url)
+			time.sleep(3)
 			yield scrapy.Request(url,callback=self.parse_rule,dont_filter=True)
 			# rooms = LinkExtractor(canonicalize=True, unique=True).extract_links(response)
 			# for room in rooms:
@@ -55,25 +61,37 @@ class MySpider(scrapy.Spider):
 			# 		is_allowed = True
 			# 		if is_allowed:
 			# 			yield scrapy.Request(room.url, callback=self.parse_page, dont_filter=True)
-		
-
+#https://www.airbnb.com/s/Chengdu--Sichuan--China/homes?allow_override%5B%5D=&s_tag=R69H-zV3section_offset=&10
+# https://www.airbnb.com/s/Chengdu--Sichuan--China/homes?allow_override%5B%5D=&ne_lat=30.688247237313426&ne_lng=104.11966288655003&sw_lat=30.603382238805196&sw_lng=104.05185664265355&zoom=13&search_by_map=true&s_tag=Ife483uE
+# https://www.airbnb.com/s/Chengdu--Sichuan--China/homes?allow_override%5B%5D=&ne_lat=30.688247237313426&ne_lng=104.11966288655003&sw_lat=30.603382238805196&sw_lng=104.05185664265355&zoom=13&search_by_map=true&s_tag=Ife483uE&section_offset=1		
+# https://www.airbnb.com/s/Chengdu--Sichuan--China/homes?allow_override%5B%5D=&ne_lat=30.688247237313426&ne_lng=104.11966288655003&sw_lat=30.603382238805196&sw_lng=104.05185664265355&zoom=13&search_by_map=true&s_tag=Ife483uE&section_offset=2
 	def parse_rule(self,response):
-		rooms = LinkExtractor(canonicalize=True, unique=True).extract_links(response)
+	# 	rooms = LinkExtractor(canonicalize=True, unique=True).extract_links(response)
+	# 	for room in rooms:
+	# 	# Check whether the domain of the URL of the link is allowed; so whether it is in one of the allowed domain
+	# 		is_allowed = False
+	# 		if MySpider.allowed_domains[0] in room.url:
+	# 			is_allowed = True
+	# 			if is_allowed and room.url not in MySpider.visited:
+	# 				print(room.url)
+	# 				MySpider.visited.append(room.url)
+	# 				yield scrapy.Request(room.url, callback=self.parse_page, dont_filter=True)
+		rooms = response.xpath('//div[@class="_v72lrv"]/div/a/@href').extract()
 		for room in rooms:
-		# Check whether the domain of the URL of the link is allowed; so whether it is in one of the allowed domains
-			is_allowed = False
-			if MySpider.allowed_domains[0] in room.url:
-				is_allowed = True
-				if is_allowed:
-					print(room.url)
-					yield scrapy.Request(room.url, callback=self.parse_page, dont_filter=True)
-	# 	# Return all the found items
-	
+			web_page = 'https://www.airbnb.com'+room
+			if 'rooms/' in room and web_page not in MySpider.visited:
+				print('seems ok')
+				MySpider.visited.append(web_page)
+				yield scrapy.Request(web_page, callback=self.parse_page, dont_filter=True)
+
+	# # 	# Return all the found items
+
+
 	def parse_page(self, response):
 		# open_in_browser(response)
 		# pass
 		item = AbnbItem()
-		soup = BeautifulSoup(response.body)
+		soup = BeautifulSoup(response.body,"lxml")
 		pattern = re.compile(r'bootstrapData')
 		a = soup.find_all('script',text=pattern)
 		json_data = a[0]
